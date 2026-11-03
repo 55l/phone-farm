@@ -14,6 +14,7 @@ import {
     CALIBRATABLE_POINTS, POINT_LABELS, coordinatesForProfile, resolveDeviceCoordinates, validateCoordinateOverrides,
 } from '../devices/coordinates.js';
 import { RegistryWdaRemoteControl } from '../devices/registry-remote.js';
+import { allocateDevicePorts } from '../devices/registration.js';
 import type {
     DeviceRegistrationManager, RegistrationAction, RegistrationUpdate,
 } from '../devices/registration.js';
@@ -48,6 +49,7 @@ interface LoadedDashboardTheme {
     tasksScript: string;
     registerDeviceHtml: string;
     registerDeviceScript: string;
+    workspaceScript: string;
     htmx: string;
 }
 
@@ -73,9 +75,8 @@ function escapeHtml(value: unknown): string {
     })[character] ?? character);
 }
 
-// Shown at the foot of every dashboard page. Override the link with
-// PHONE_FARM_BRAND_URL; the text is fixed.
-const FOOTER_HTML = `Built by <a href="${escapeHtml(process.env.PHONE_FARM_BRAND_URL ?? 'https://agniverse.co')}" target="_blank" rel="noopener">Agniverse</a>, with love and curry &#10084;&#65039;`;
+// Promotional attribution is omitted from this local UI; source notices remain in NOTICE.
+const FOOTER_HTML = ''; // Local customization: no promotional footer.
 
 function page(title: string, body: string, logoutPath?: string, navLinks: readonly PluginNavLink[] = []): string {
     const logout = logoutPath ? `<a href="${escapeHtml(logoutPath)}" style="float:right;margin-right:0">Log out</a>` : '';
@@ -148,6 +149,11 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     }
 
     const remote = new RegistryWdaRemoteControl();
+    const liveStreams = new Set<AbortController>();
+    app.addHook('preClose', async () => {
+        for (const controller of liveStreams) controller.abort();
+        liveStreams.clear();
+    });
     const logoutPath = options.authProvider?.logoutPath;
     const authNavHtml = logoutPath
         ? `<a class="button secondary app-logout" href="${escapeHtml(logoutPath)}">Log out</a>` : '';
@@ -164,7 +170,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     if (options.dashboardTheme) {
         const root = options.dashboardTheme.rootDirectory;
         const require = createRequire(import.meta.url);
-        const [indexHtml, deviceHtml, tasksHtml, registerDeviceHtml, styles, deviceScript, tasksScript, registerDeviceScript, htmx] = await Promise.all([
+        const [indexHtml, deviceHtml, tasksHtml, registerDeviceHtml, styles, deviceScript, tasksScript, registerDeviceScript, htmx, workspaceScript] = await Promise.all([
             readFile(path.join(root, 'templates/index.html'), 'utf8'),
             readFile(path.join(root, 'templates/device.html'), 'utf8'),
             readFile(path.join(root, 'templates/tasks.html'), 'utf8'),
@@ -174,6 +180,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
             readFile(path.join(root, 'assets/tasks.js'), 'utf8'),
             readFile(path.join(root, 'assets/register-device.js'), 'utf8'),
             readFile(require.resolve('htmx.org/dist/htmx.min.js'), 'utf8'),
+            readFile(path.join(root, 'assets/workspace.js'), 'utf8').catch(() => ''),
         ]);
         // Content-hash every asset URL in the templates so a changed file gets a
         // fresh URL that no browser or CDN can serve stale.
@@ -181,6 +188,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
             'styles.css': assetHash(styles), 'device.js': assetHash(deviceScript),
             'tasks.js': assetHash(tasksScript), 'register-device.js': assetHash(registerDeviceScript),
             'htmx.min.js': assetHash(htmx),
+            'workspace.js': assetHash(workspaceScript),
         };
         const finalize = (html: string) => {
             let out = html.replaceAll('__AUTH_NAV__', authNavHtml).replaceAll('__PLUGIN_NAV__', pluginNavHtml)
@@ -191,7 +199,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         themed = {
             indexHtml: finalize(indexHtml), deviceHtml: finalize(deviceHtml),
             tasksHtml: finalize(tasksHtml), registerDeviceHtml: finalize(registerDeviceHtml),
-            styles, deviceScript, tasksScript, registerDeviceScript, htmx,
+            styles, deviceScript, tasksScript, registerDeviceScript, htmx, workspaceScript,
         };
     }
 
@@ -277,13 +285,22 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
             if (passcode !== undefined && !PASSCODE_PATTERN.test(passcode)) {
                 return reply.code(400).send({ error: 'Device passcode must contain at least four digits' });
             }
-            const created = await mutateRegisteredDevices((devices) => {
+            const created = await mutateRegisteredDevices(async (devices) => {
                 if (devices.some((device) => device.udid === udid)) throw httpError(409, 'A device with this UDID is already registered');
+                const reserved = new Set(devices.flatMap(device => [device.wdaLocalPort ?? 8100, device.mjpegLocalPort ?? 9100]));
+                for (const port of [wdaLocalPort, mjpegLocalPort]) {
+                    if (port !== undefined && (!Number.isInteger(port) || port < 1024 || port > 65535)) throw httpError(400, 'Device ports must be integers from 1024 to 65535');
+                    if (port !== undefined && reserved.has(port)) throw httpError(409, 'A device port is already assigned to another phone');
+                }
+                if (wdaLocalPort !== undefined && wdaLocalPort === mjpegLocalPort) throw httpError(400, 'Control and video ports must differ');
+                const allocated = wdaLocalPort === undefined || mjpegLocalPort === undefined
+                    ? await allocateDevicePorts(devices, wdaLocalPort !== undefined || mjpegLocalPort !== undefined
+                        ? [{ wdaLocalPort: wdaLocalPort ?? 0, mjpegLocalPort: mjpegLocalPort ?? 0 }] : []) : undefined;
                 // Explicit whitelist — never mass-assign arbitrary body keys into devices.json.
                 const device: RegisteredDevice = {
                     name: name ?? udid, udid, pluginData: pluginData ?? {},
-                    ...(wdaLocalPort !== undefined ? { wdaLocalPort } : {}),
-                    ...(mjpegLocalPort !== undefined ? { mjpegLocalPort } : {}),
+                    wdaLocalPort: wdaLocalPort ?? allocated!.wdaLocalPort,
+                    mjpegLocalPort: mjpegLocalPort ?? allocated!.mjpegLocalPort,
                     ...(coordinateProfile !== undefined ? { coordinateProfile: coordinateProfile as RegisteredDevice['coordinateProfile'] } : {}),
                     ...(passcode !== undefined ? { passcode } : {}),
                 };
@@ -394,12 +411,21 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         // Close the upstream device stream the moment the browser goes away —
         // otherwise every HTMX fragment swap leaks a live MJPEG connection.
         const abort = new AbortController();
-        request.raw.once('close', () => abort.abort());
+        liveStreams.add(abort);
+        reply.raw.once('close', () => {
+            liveStreams.delete(abort);
+            abort.abort();
+        });
         const upstream = await remote.getMjpegStream(request.params.udid, abort.signal);
         if (!upstream.body) return reply.code(503).send({ error: 'Device stream is unavailable' });
         return reply.header('cache-control', 'no-store, no-cache, must-revalidate')
             .type(upstream.headers.get('content-type') ?? 'multipart/x-mixed-replace; boundary=--BoundaryString')
             .send(Readable.from(upstream.body as AsyncIterable<Uint8Array>));
+    });
+    app.get<{ Params: { udid: string } }>('/api/devices/:udid/remote/lock-state', async (request, reply) => {
+        const device = (await loadRegisteredDevices()).find(entry => entry.udid === request.params.udid);
+        if (!device) return reply.code(404).send({ error: 'Device is not registered.' });
+        return { locked: await remote.isLocked(device.udid), hasPasscode: Boolean(device.passcode) };
     });
     app.post<{ Params: { udid: string }; Body: RemoteAction }>('/api/devices/:udid/remote/action', async (request, reply) => {
         if (await options.scheduler.activeExecution(request.params.udid)) {
@@ -565,6 +591,14 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         };
         app.get('/assets/styles.css', asset('text/css', theme.styles));
         app.get('/assets/device.js', asset('text/javascript', theme.deviceScript));
+        app.get('/assets/workspace.js', asset('text/javascript', theme.workspaceScript));
+        app.get<{ Params: { font: string } }>('/assets/fonts/:font', async (request, reply) => {
+            if (!/^(plex-(400|500|600|700)|rajdhani-(600|700))\.ttf$/.test(request.params.font)) return reply.code(404).send();
+            try {
+                const font = await readFile(path.join(options.dashboardTheme!.rootDirectory, 'fonts', request.params.font));
+                return reply.type('font/ttf').header('cache-control', 'public, max-age=86400').send(font);
+            } catch { return reply.code(404).send(); }
+        });
         app.get('/assets/tasks.js', asset('text/javascript', theme.tasksScript));
         app.get('/assets/register-device.js', asset('text/javascript', theme.registerDeviceScript));
         app.get('/assets/htmx.min.js', asset('text/javascript', theme.htmx));
@@ -597,7 +631,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
             const device = (await discoverConnectedDevices()).find(({ udid }) => udid === request.params.udid);
             if (!device) return reply.type('text/html').send('<section id="device-summary" class="device-summary error"><div><h2>Device disconnected</h2></div></section>');
             const screen = await remote.getScreenInfo(device.udid);
-            return reply.type('text/html').send(`<section id="device-summary" class="device-summary" data-screen-width="${screen.screenSize.width}" data-screen-height="${screen.screenSize.height}"><div><span class="eyebrow">Connected device</span><h1>${escapeHtml(device.name)}</h1><p>iOS ${escapeHtml(device.osVersion)} · ${screen.screenSize.width} × ${screen.screenSize.height} points · ${screen.scale}×</p></div><code>${escapeHtml(device.udid)}</code></section>`);
+            return reply.type('text/html').send(`<section id="device-summary" class="device-summary" data-screen-width="${screen.screenSize.width}" data-screen-height="${screen.screenSize.height}"><div><span class="eyebrow">Connected device</span><h1>${escapeHtml(device.name)}</h1><p>${escapeHtml(device.modelName ?? 'iPhone')} · iOS ${escapeHtml(device.osVersion)} · ${screen.screenSize.width} × ${screen.screenSize.height} points · ${screen.scale}×</p></div><code>${escapeHtml(device.udid)}</code></section>`);
         });
         app.get<{ Params: { udid: string } }>('/api/devices/:udid/fragments/activity', async (request, reply) => {
             return reply.type('text/html').send(await renderActivity(request.params.udid));
@@ -618,13 +652,14 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         if (!themed) return reply.type('text/html').send(renderPage('Register device', '<h1>Register device</h1><p>Use <code>POST /api/device-registrations</code> to start device setup.</p>'));
         return reply.type('text/html').send(themed.registerDeviceHtml);
     });
-    app.get<{ Params: { udid: string } }>('/devices/:udid', async (request, reply) => {
+    app.get<{ Params: { udid: string }; Querystring: { embedded?: string } }>('/devices/:udid', async (request, reply) => {
         const device = (await loadRegisteredDevices()).find(({ udid }) => udid === request.params.udid);
         if (!device) return reply.code(404).type('text/html').send(renderPage('Not found', '<h1>Device not found</h1>'));
         if (themed) {
             const rendered = options.dashboardTheme?.renderDevice
                 ? options.dashboardTheme.renderDevice(themed.deviceHtml, device) : themed.deviceHtml;
-            return reply.type('text/html').send(rendered.replaceAll('__DEVICE_UDID__', encodeURIComponent(device.udid)));
+            const html = rendered.replaceAll('__DEVICE_UDID__', encodeURIComponent(device.udid));
+            return reply.type('text/html').send(request.query.embedded === '1' ? html.replace('<body>', '<body class="embedded-device">') : html);
         }
         const schedules = await options.scheduler.listSchedules(50, device.udid);
         const executions = await options.scheduler.listExecutions(50, device.udid);

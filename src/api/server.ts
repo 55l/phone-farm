@@ -5,6 +5,7 @@ import { configuredPluginModules, loadAuthProvider, loadPlugins } from '../loade
 import { PluginRegistry } from '../registry.js';
 import { createSchedulerRuntime } from '../scheduler/runtime.js';
 import { assertSafeBind } from '../security.js';
+import { createInstagramPlugin } from '../instagram-plugin.js';
 import { createTikTokPlugin } from '../tiktok-plugin.js';
 import { defaultDashboardTheme } from '../dashboard-theme.js';
 import { DeviceRegistrationService } from '../devices/registration.js';
@@ -19,7 +20,8 @@ export interface StartServerOptions {
 }
 
 export async function defaultPlugins(): Promise<PhoneFarmPlugin[]> {
-    return [createTikTokPlugin({ bundleId: process.env.TIKTOK_BUNDLE_ID }),
+    return [...(process.env.PHONE_FARM_INSTAGRAM_ENABLED !== 'false' ? [createInstagramPlugin()] : []),
+        ...(process.env.PHONE_FARM_TIKTOK_ENABLED === 'true' ? [createTikTokPlugin({ bundleId: process.env.TIKTOK_BUNDLE_ID })] : []),
         ...await loadPlugins(configuredPluginModules())];
 }
 
@@ -50,7 +52,17 @@ export async function startServer(options: StartServerOptions = {}) {
 
 async function main(): Promise<void> {
     const runtime = await startServer();
-    const shutdown = async () => runtime.close();
+    const shutdown = async () => {
+        try {
+            await runtime.close();
+            // Device discovery libraries can retain USB sockets after HTTP and
+            // database shutdown. This dedicated CLI process must still exit.
+            process.exit(0);
+        } catch (error) {
+            console.error('Dashboard shutdown failed:', error);
+            process.exit(1);
+        }
+    };
     process.once('SIGINT', () => void shutdown());
     process.once('SIGTERM', () => void shutdown());
 }

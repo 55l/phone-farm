@@ -1,3 +1,4 @@
+try { document.documentElement.dataset.theme = localStorage.getItem('phone-workspace-theme') === 'light' ? 'light' : 'dark'; } catch { /* default theme */ }
 export {};
 
 interface Schedule {
@@ -101,7 +102,7 @@ function renderExecutions(items: Execution[]): void {
         }
         if (execution.status === 'failed' || execution.status === 'stopped') {
             actions.append(button('Retry', async () => {
-                if (execution.taskType === 'post' && !window.confirm('The post may already have reached TikTok. Retry only after checking the device.')) return;
+                if (execution.taskType === 'post' && !window.confirm('The post may already have reached the app. Retry only after checking the device.')) return;
                 await request(`/api/executions/${execution.id}/retry`, { method: 'POST' }); await load();
             }));
         }
