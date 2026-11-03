@@ -38,15 +38,30 @@ Do not assume a brand-new install has passed the real-device checks below just b
 Use a normal signed-in macOS user, not root. Use a local project folder outside cloud-synced storage. The Mac must remain powered, awake, online, and connected to its phones. Its signing keychain must be available.
 
 - Install **full Xcode from Apple**, open it, and let the owner complete first-launch/license and Apple-account sign-in prompts. Command Line Tools alone are insufficient.
-- In Xcode → Settings → Accounts, add the owner's development account and identify the team. Ensure its certificate/provisioning supports the devices. Team limits and certificate validity depend on the account; do not promise permanent unattended signing.
-- Install Homebrew from its official website if needed. Let the owner handle any administrator prompts locally.
+- In Xcode → Settings → Accounts, add the owner's development account and identify the team. Ensure its certificate/provisioning supports the devices. Team limits and certificate validity depend on the account; do not promise permanent unattended signing. Record whether the owner uses a **paid Apple Developer Program** team or a **free Apple ID (Personal Team)**. With a free account the control app's signature expires every 7 days and must be refreshed by hand; follow [FREE_APPLE_ACCOUNT.md](FREE_APPLE_ACCOUNT.md) and tell the owner about this weekly maintenance before deployment.
+- Install Homebrew from its official website if needed. Its installer asks for the Mac administrator password interactively, so the owner runs it in their own Terminal window, not through the assistant. On a brand-new Mac, `brew` is not on PATH until its shell setup is added; then open a new terminal or `source ~/.zprofile`:
+
+  ```sh
+  test -x /opt/homebrew/bin/brew && BREW=/opt/homebrew/bin/brew || BREW=/usr/local/bin/brew
+  grep -q 'brew shellenv' ~/.zprofile 2>/dev/null || echo "eval \"\$($BREW shellenv)\"" >> ~/.zprofile
+  eval "$($BREW shellenv)"
+  ```
 - Install the required tools:
 
   ```sh
   brew install node@24 postgresql@16 cloudflared
   ```
 
-  Follow Homebrew's PATH instructions so `node` resolves to version 24 or later. The PostgreSQL helper detects `/opt/homebrew` on Apple silicon and `/usr/local` on Intel. Do not start a global PostgreSQL service for this app.
+  `node@24` and `postgresql@16` are **keg-only**: Homebrew installs them but does not put them on PATH. Add Node 24 to the login PATH explicitly, then confirm it resolves:
+
+  ```sh
+  grep -q 'opt/node@24/bin' ~/.zprofile || echo "export PATH=\"$(brew --prefix node@24)/bin:\$PATH\"" >> ~/.zprofile
+  export PATH="$(brew --prefix node@24)/bin:$PATH"
+  node --version   # must print v24.x
+  which node npm   # both under .../opt/node@24/bin
+  ```
+
+  Do not add PostgreSQL 16 to PATH; the database helper finds it under `/opt/homebrew/opt/postgresql@16` (Apple silicon) or `/usr/local/opt/postgresql@16` (Intel). Do not start a global PostgreSQL service for this app.
 - If necessary, select the full Xcode installation:
 
   ```sh
@@ -61,7 +76,7 @@ The exercised reference stack was Node 24, PostgreSQL 16, Xcode 26.0.1, XCUITest
 ## 3. Get this code and install dependencies
 
 ```sh
-git clone https://github.com/55l/phonefarm.git
+git clone https://github.com/55l/phone-farm.git phonefarm
 cd phonefarm
 npm ci --ignore-scripts
 npm run appium:install-driver
@@ -88,7 +103,7 @@ Edit the generated `.env` locally. Retain the generated database credentials and
 | `WDA_BUNDLE_ID` | A unique development bundle identifier usable by that team, e.g. `com.example.phoneworkspace.WebDriverAgentRunner` after replacing the example namespace. |
 | `XCODE_SIGNING_ID` | Normally `Apple Development`. |
 | `XCODE_DEVELOPER_DIR` | Full selected Xcode developer directory; the helper supplies it. |
-| `IOS_PLATFORM_VERSION` | Deployment minimum compatible with the phone and selected WDA/Xcode; `17.0` was tested. This is not a universal fleet runtime version. |
+| `IOS_PLATFORM_VERSION` | The minimum iOS version the control app is built for (Xcode deployment target), not the phones' actual iOS version. The generated default `16.7` installs on any phone running iOS 16.7 or newer and is the right choice for a mixed fleet. The reference host used `17.0` with an iOS 17.0 phone; both work there. Raise it only if the selected Xcode rejects the default. It must not be higher than the oldest phone's iOS. |
 | `PHONE_FARM_INSTAGRAM_ENABLED` | `true`. |
 | `PHONE_FARM_TIKTOK_ENABLED` | `false`. |
 | `WEB_HOST`, `APPIUM_HOST` | `127.0.0.1`. |
@@ -100,31 +115,32 @@ Do not start a scheduler worker for this guide. An optional `IOS_UDID` pins CLI 
 The owner must perform physical prompts. Do not request a phone passcode or Apple verification code in chat.
 
 1. Connect the phone over a reliable **data-capable USB cable**, unlock it, and accept Trust This Computer on the phone.
-2. Enable Settings → Privacy & Security → Developer Mode, including its restart/confirmation if requested.
-3. Open Xcode → Window → Devices and Simulators. Wait until it reports the device ready. Do not proceed while it is stuck at Connecting/Preparing.
-4. Identify the device locally:
+2. Open Xcode → Window → Devices and Simulators with the phone connected and unlocked. Xcode will report that Developer Mode is disabled; that is expected at this point.
+3. On the phone, enable Settings → Privacy & Security → Developer Mode. The toggle normally **appears only after Xcode has seen the phone** in step 2; if it is missing, reconnect the cable with Xcode's device window open and check again. Accept the restart, unlock the phone, and confirm **Turn On** when prompted.
+4. Back in Xcode's device window, wait until it reports the device ready (it may copy debug support files for several minutes). Do not proceed while it is stuck at Connecting/Preparing.
+5. Identify the device locally:
 
    ```sh
    xcrun xctrace list devices
    ```
 
    Treat its UDID as local configuration, not public documentation. Ignore simulator entries.
-5. Build the control app for that actual device:
+6. Build the control app for that actual device:
 
    ```sh
    npm run wda:prepare -- --udid YOUR_DEVICE_UDID
    ```
 
    Replace the placeholder before execution. The preparation script applies the exact WDA 16.17.5 patches with zero fuzz and runs a signed `build-for-testing`. A successful build is not proof that the runner is installed or controlling the phone yet. Do not run a second competing WDA build/supervisor during this step.
-6. Start the workspace:
+7. Start the workspace:
 
    ```sh
    npm run local:start
    ```
 
    On a fresh local-only installation open `http://127.0.0.1:3000`. Use **Add a phone** to add the prepared phone with its real UDID and a useful name. Leave optional phone-passcode storage unset unless the owner explicitly wants it. Registration allocates distinct WDA/MJPEG ports; the device service then supervises the signed runner.
-7. If the installed runner triggers an untrusted developer prompt, have the owner trust the correct profile under Settings → General → VPN & Device Management. If no profile is shown yet, wait until the runner is installed/launched; the build alone may not create it.
-8. Keep the phone unlocked for initial launch. Confirm the dashboard shows it online and its actual screen.
+8. If the installed runner triggers an untrusted developer prompt, have the owner trust the correct profile under Settings → General → VPN & Device Management. If no profile is shown yet, wait until the runner is installed/launched; the build alone may not create it.
+9. Keep the phone unlocked for initial launch. Confirm the dashboard shows it online and its actual screen.
 
 Default first-device ports are WDA control 8100 and MJPEG video 9100. The dashboard is 3000, Appium 4725, database 55432. Keep them private. Additional phones need separate control and video ports, not additional public ports.
 
@@ -161,7 +177,17 @@ Complete local phone control and password setup first. Use a dedicated **remotel
 
 1. Have the owner sign in to Cloudflare directly. Use the current Cloudflare One dashboard's Networks / Connectors / Cloudflare Tunnels area to create a named cloudflared tunnel for this host. Navigation labels can change; check the official documentation linked below.
 2. Confirm the approved domain's DNS is supported by the account's Cloudflare setup. A domain registered elsewhere can remain registered there. If it is not already configured for Cloudflare, inspect existing website/email records and DNSSEC and obtain authorization for the actual DNS scope before changing it; follow CLOUDFLARE_ACCESS.md. Do not use a remembered domain or hostname from another installation.
-3. Store the tunnel connector token locally at `.local/cloudflare/tunnel-token`; directory mode 700, file mode 600. Use a private file editor or owner-controlled entry, never a command containing the token. Do not paste the token into chat, commit it, or run Cloudflare's token-in-command example in a recorded terminal. Do not install a second system connector service: this repository's helper manages this connector.
+3. Store the tunnel connector token locally at `.local/cloudflare/tunnel-token` through the clipboard, so it never appears in chat, a command line, or terminal output. Cloudflare's tunnel setup page shows install commands such as `cloudflared service install eyJ…` or `cloudflared tunnel run --token eyJ…`. **Do not run those commands.** Have the owner copy that command (or just the long `eyJ…` token inside it) on the host Mac, then run from the project directory:
+
+   ```sh
+   mkdir -p .local/cloudflare && chmod 700 .local/cloudflare
+   (umask 077; pbpaste | grep -oE 'eyJ[A-Za-z0-9+/=_-]+' | head -n 1 > .local/cloudflare/tunnel-token)
+   chmod 600 .local/cloudflare/tunnel-token
+   pbcopy < /dev/null   # clear the clipboard
+   if [ -s .local/cloudflare/tunnel-token ]; then echo "Tunnel token saved."; else echo "No token found on the clipboard; copy it again and rerun."; fi
+   ```
+
+   The extraction keeps only the token, whether the owner copied the bare token or the whole install command. Do not `cat` or print the file. Do not commit it or install a second system connector service: this repository's helper manages this connector. To replace a rotated token, have the owner copy the new one and rerun the same commands.
 4. Configure the tunnel's published application route for the approved hostname (for example, `phones.example.com`) to the service **HTTP → `127.0.0.1:3000`**. Leave the path unrestricted so `/api`, `/assets`, `/auth`, and `/devices` reach the app. Do not route video directly to a WDA port or expose Appium, PostgreSQL, or Mac remote desktop. Keep the connector stopped until authentication is verified below. Browser access to the hostname uses HTTPS even though the connector's loopback service uses HTTP.
 
 ### 8.2 Enable the app's existing password gate

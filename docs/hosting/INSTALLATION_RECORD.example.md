@@ -20,5 +20,6 @@ Do not fill this public template with live credentials or commit the completed r
 - Restart and reboot/login acceptance results:
 - Private backup location and most recent restore test:
 - Owner responsible for on-site unlock/trust/recovery:
-- Signing/certificate renewal follow-up:
+- Apple account type (paid team / free Apple ID) and current control-app signature expiry (UTC):
+- Signing/certificate renewal follow-up (free account: weekly refresh per FREE_APPLE_ACCOUNT.md):
 - Remaining limits or incomplete steps:

@@ -7,7 +7,7 @@ Then complete **[HOST_DEPLOYMENT.md](HOST_DEPLOYMENT.md)** for a dedicated hoste
 ## Fresh install
 
 ```sh
-git clone https://github.com/55l/phonefarm.git
+git clone https://github.com/55l/phone-farm.git phonefarm
 cd phonefarm
 npm ci --ignore-scripts
 npm run appium:install-driver

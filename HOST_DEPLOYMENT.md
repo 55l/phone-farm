@@ -25,7 +25,7 @@ The installation needs:
 
 - A supported Mac, normal user account, power/network access, and a local project directory.
 - One initial USB iPhone, its data-capable cable, and someone on site to unlock it and accept trust/developer prompts.
-- The owner's Apple signing account/team and a bundle identifier that team can use. The owner signs in to Xcode directly.
+- The owner's Apple signing account/team and a bundle identifier that team can use. The owner signs in to Xcode directly. Confirm whether it is a paid Developer Program team or a free Apple ID. A free account's signature expires every 7 days, and the phones go offline unless someone runs the weekly refresh in [FREE_APPLE_ACCOUNT.md](FREE_APPLE_ACCOUNT.md); a free-account host cannot be fully unattended.
 - A shared website password set through the localhost setup page, not sent to the assistant.
 - For stable hosting only: the approved hostname, Cloudflare account access handled by the owner, and a dedicated named-tunnel connector token stored privately on the host.
 - The person responsible for restarting/unlocking the Mac and phones, signing renewal, and backups.
@@ -37,11 +37,11 @@ Inspect existing configuration before generating anything. Never replace a runni
 Follow AI_SETUP sections 1–6 for the details. This is the required order, not a shortcut around those checks:
 
 1. Install full Xcode, complete its first launch, select it with xcode-select, and sign in to the owner's Apple development account.
-2. Install Homebrew, Node 24+, PostgreSQL 16, and cloudflared. Confirm the tools resolve correctly in the host user's environment.
+2. Install Homebrew, Node 24, PostgreSQL 16, and cloudflared exactly as in AI_SETUP section 2. `node@24` is keg-only, so add it to `~/.zprofile` as shown there, then confirm `node --version` prints v24.x in a **new** terminal window.
 3. Clone this repository into a non-cloud-synced local directory:
 
    ```sh
-   git clone https://github.com/55l/phonefarm.git
+   git clone https://github.com/55l/phone-farm.git phonefarm
    cd phonefarm
    npm ci --ignore-scripts
    npm run appium:install-driver
@@ -49,7 +49,7 @@ Follow AI_SETUP sections 1–6 for the details. This is the required order, not 
    ```
 
 4. Configure private `.env` signing values (`XCODE_ORG_ID`, `WDA_BUNDLE_ID`, selected Xcode, compatible deployment minimum). Keep the generated database credentials and loopback addresses.
-5. Pair the first phone, enable Developer Mode, wait for Xcode readiness, identify its actual UDID locally, and run:
+5. Pair the first phone and open Xcode's device window. Then enable Developer Mode on the phone; the toggle appears only after Xcode has seen it (AI_SETUP section 5). Wait for Xcode readiness, identify the phone's actual UDID locally, and run:
 
    ```sh
    npm run wda:prepare -- --udid YOUR_DEVICE_UDID
@@ -84,7 +84,7 @@ The helper installs and verifies shared-password authentication before creating 
 Only perform this after the owner explicitly chooses stable hosting and approves its hostname/account/DNS scope. Follow [AI_SETUP.md section 8](AI_SETUP.md#8-connect-regular-remote-access-with-a-stable-https-address) for the complete connector sequence and [CLOUDFLARE_ACCESS.md](CLOUDFLARE_ACCESS.md) for provider details, especially existing website/email records and DNSSEC timing. Do not infer that an unrelated domain should be moved.
 
 1. Set up the approved hostname and a **dedicated remotely managed named tunnel** in the owner's Cloudflare account. Publish only that hostname to `http://127.0.0.1:3000`; never publish database/Appium/WDA ports.
-2. Save the connector token privately as `.local/cloudflare/tunnel-token`, permission 600, with the directory 700. Do not include the token in a command or document. Do not install a second brew/Cloudflare system service for the same connector; this repository's helper will own it.
+2. Save the connector token privately as `.local/cloudflare/tunnel-token`, permission 600, with the directory 700. Use the clipboard procedure in AI_SETUP section 8.1 step 3. Do not run Cloudflare's token-bearing install command or include the token in a command or document. Do not install a second brew/Cloudflare system service for the same connector; this repository's helper will own it.
 3. Create or deliberately update `.env.remote` after backing up an existing version privately:
 
    ```dotenv
@@ -145,7 +145,7 @@ This section is a **deployment template**, not something installed merely by clo
 
 The template runs `local-dashboard.mjs start` at login and every 60 seconds. The existing helper starts stopped app-owned components and leaves a running dashboard in place. A named connector is started when `.local/cloudflare/enabled` exists. A temporary quick tunnel is not recreated, because that would silently change its address.
 
-This is **user-login startup and start-if-stopped recovery**, not boot-before-login operation or a full watchdog. A hung process, unavailable keychain, broken certificate, failed USB trust, or stale database PID still requires diagnosis. A successful launchd job does not prove that phones are online.
+This is **user-login startup and start-if-stopped recovery**, not boot-before-login operation or a full watchdog. It never re-signs the phone-control app: on a free Apple account, a restart after the 7-day signature expires leaves phones offline until the [weekly refresh](FREE_APPLE_ACCOUNT.md) is run. A hung process, unavailable keychain, broken certificate, failed USB trust, or stale database PID still requires diagnosis. A successful launchd job does not prove that phones are online.
 
 Generate the host-specific plist from the repository template, from the actual installed project directory:
 

@@ -1,3 +1,6 @@
+# Legacy/development only. The supported host setup (npm run host:setup) uses a
+# dedicated PostgreSQL 16 cluster in .local/postgres on 127.0.0.1:55432 and does
+# not use Docker. Do not start this alongside a host:setup installation.
 services:
   postgres:
     image: postgres:17-alpine

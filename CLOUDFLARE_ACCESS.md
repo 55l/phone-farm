@@ -23,7 +23,7 @@ Use only the hostname and DNS scope authorized for this installation. If the zon
 2. Review existing DNS, website, email, and DNSSEC records before changing delegation. Cloudflare Free full-zone setup generally requires Cloudflare nameservers; using only selected records with an external authoritative provider requires a supported partial setup/plan. Verify current provider requirements.
 3. Back up and preserve every website/email record. A website hosted on Vercel can remain hosted there while DNS management changes; keep its existing routing unless the owner requests otherwise.
 4. Coordinate DNSSEC: inspect the old DS TTL, remove the old DS appropriately, and allow old trust records to expire before changing nameservers. After Cloudflare activation, enable its DNSSEC and publish its new DS at the registrar. Do not apply a remembered timer from another domain.
-5. Create a dedicated named tunnel in Cloudflare. Store its connector token only in `.local/cloudflare/tunnel-token` (600), with its directory 700. Never put it in chat, Git, or shared docs.
+5. Create a dedicated named tunnel in Cloudflare. Store its connector token only in `.local/cloudflare/tunnel-token` (600), with its directory 700, using the clipboard procedure in [AI_SETUP.md section 8.1](AI_SETUP.md#81-prepare-the-approved-hostname-and-tunnel) step 3. Never put it in chat, Git, or shared docs, and do not run Cloudflare's token-bearing install command.
 6. Publish only the chosen hostname to `http://127.0.0.1:3000`. Never expose PostgreSQL, Appium, WDA, or Mac remote desktop ports. In shared-password mode, the application itself enforces sign-in; do not attach an unrelated email Access policy.
 7. Before running the connector, set private `.env.remote`:
 

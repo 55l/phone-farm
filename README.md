@@ -8,6 +8,7 @@ A macOS dashboard for controlling physical iPhones over USB, with manual Instagr
 - **[HOST_DEPLOYMENT.md](HOST_DEPLOYMENT.md)** — dedicated host deployment, stable hosting, optional login startup, recovery, backups, and acceptance checklist.
 - **[AGENTS.md](AGENTS.md)** — repository instructions for coding and setup agents.
 - [NEW_HOST_MAC.md](NEW_HOST_MAC.md) — moving the setup to another Mac.
+- [FREE_APPLE_ACCOUNT.md](FREE_APPLE_ACCOUNT.md) — weekly signing refresh when using a free Apple ID instead of a paid developer account.
 - [CLOUDFLARE_ACCESS.md](CLOUDFLARE_ACCESS.md) — named tunnels, stable hostnames, and optional temporary access.
 - [REMOTE_ACCESS.md](REMOTE_ACCESS.md) — choosing remote access and optional Tailscale.
 - [DEVELOPMENT.md](DEVELOPMENT.md) — editing the dashboard and backend.
@@ -29,7 +30,7 @@ The Instagram plugin is enabled by default; the legacy TikTok plugin is disabled
 On a supported Mac with full Xcode, an Apple signing team, Node 24+, PostgreSQL 16, and a USB-connected iPhone:
 
 ```sh
-git clone https://github.com/55l/phonefarm.git
+git clone https://github.com/55l/phone-farm.git phonefarm
 cd phonefarm
 npm ci --ignore-scripts
 npm run appium:install-driver
